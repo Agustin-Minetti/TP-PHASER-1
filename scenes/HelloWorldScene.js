@@ -8,39 +8,193 @@ export default class HelloWorldScene extends Phaser.Scene {
   }
 
   init() {
-    // this is called before the scene is created
-    // init variables
-    // take data passed from other scenes
-    // data object param {}
+
   }
 
   preload() {
-    // load assets
-    this.load.image("sky", "./assets/space3.png");
-    this.load.image("logo", "./assets/phaser3-logo.png");
-    this.load.image("red", "./assets/particles/red.png");
+    this.load.image("jugador",    "public/assets/ninja.png");
+    this.load.image("plataforma", "public/assets/piso.png");
+    this.load.image("cuadrado",   "public/assets/cuadrado.png");
+    this.load.image("triangulo",  "public/assets/triangulo.png");
+    this.load.image("rombo",      "public/assets/rombo.png");
+    this.load.image("maldito",    "public/assets/maldito.png");
   }
 
   create() {
-    // create game objects
-    this.add.image(400, 300, "sky");
+    // Fondo
+    this.cameras.main.setBackgroundColor('#1a1a2e');
 
-    const logo = this.physics.add.image(400, 100, "logo");
-    logo.setVelocity(100, 200);
-    logo.setBounce(1, 1);
-    logo.setCollideWorldBounds(true);
+    // Plataforma principal
+    this.plataforma = this.physics.add.staticGroup();
+    this.plataforma.create(400, 590, "plataforma")
+    .setDisplaySize(800, 20)
+    .refreshBody();
 
-    // emmit particles from logo
-    const emitter = this.add.particles(0, 0, "red", {
-      speed: 100,
-      scale: { start: 1, end: 0 },
-      blendMode: "ADD",
+    // Plataformas adicionales
+    this.plataforma.create(150, 450, "plataforma")
+    .setDisplaySize(200, 15)
+    .refreshBody();
+
+    this.plataforma.create(650, 450, "plataforma")
+    .setDisplaySize(200, 15)
+    .refreshBody();
+
+    this.plataforma.create(400, 320, "plataforma")
+    .setDisplaySize(200, 15)
+    .refreshBody();
+
+    // Jugador
+    this.jugador = this.physics.add.sprite(400, 530, "jugador")
+    .setDisplaySize(48, 48);
+    this.jugador.setCollideWorldBounds(true);
+
+    // Items (solo una vez)
+    this.items = this.physics.add.group();
+
+    // Colisiones
+    this.physics.add.collider(this.jugador, this.plataforma);
+    this.physics.add.collider(this.items, this.plataforma, this.itemReboto, null, this);
+    this.physics.add.overlap(this.jugador, this.items, this.recolectarItem, null, this);
+
+    // Teclado
+    this.cursores = this.input.keyboard.createCursorKeys();
+
+    // Tiempo y puntaje
+    this.tiempoRestante = 30;
+    this.puntaje = 0;
+
+    // Inventario
+    this.inventario = [
+      { tipo: "cuadrado",  cantidad: 0, puntos: 10 },
+      { tipo: "triangulo", cantidad: 0, puntos: 15 },
+      { tipo: "rombo",     cantidad: 0, puntos: 20 },
+    ];
+ 
+    // UI
+    this.textoUI = this.add.text(10, 10, this.getTextoInventario(), {
+      font: "16px Arial", fill: "#ffffff"
     });
+    this.textoPuntaje = this.add.text(10, 30, `Puntaje: ${this.puntaje}`, {
+      font: "16px Arial", fill: "#ffdd00"
+    });
+    this.textoTiempo = this.add.text(790, 10, `Tiempo: ${this.tiempoRestante}`, {
+      font: "16px Arial", fill: "#ffffff"
+    }).setOrigin(1, 0);
 
-    emitter.startFollow(logo);
+    // Timers
+    this.time.addEvent({
+      delay: 500,
+      callback: this.spawnItem,
+      callbackScope: this,
+      loop: true
+    });
+    this.time.addEvent({
+      delay: 1000,
+      callback: this.descontarTiempo,
+      callbackScope: this,
+      loop: true
+    });
   }
 
   update() {
-    // update game objects
+    if (this.cursores.left.isDown) {
+      this.jugador.setVelocityX(-200);
+    } else if (this.cursores.right.isDown) {
+      this.jugador.setVelocityX(200);
+    } else {
+      this.jugador.setVelocityX(0);
+    }
+    if (this.cursores.up.isDown && this.jugador.body.touching.down) {
+      this.jugador.setVelocityY(-400);
+    }
+  }
+
+  spawnItem() {
+    const tipos = ["cuadrado", "triangulo", "rombo", "maldito"];
+    const tipo  = tipos[Phaser.Math.Between(0, 3)];
+    const x     = Phaser.Math.Between(20, 780);
+
+    const item = this.items.create(x, 0, tipo).setDisplaySize(32, 32);
+    item.tipo           = tipo;
+    item.rebotando      = false;
+    item.setVelocityY(150);
+    item.setBounce(0.6);
+    item.setCollideWorldBounds(true);
+
+    const entrada = this.inventario.find(i => i.tipo === tipo);
+    item.puntosRestantes = entrada ? entrada.puntos : 15;
+  }
+
+  recolectarItem(jugador, item) {
+    if (!item.active) return;
+    
+    const tipo = item.tipo;
+    item.setActive(false).setVisible(false);
+    item.body.enable = false;
+    this.time.delayedCall(50, () => { item.destroy(); });
+
+    if (tipo === "maldito") {
+      this.puntaje -= 15;
+      this.puntaje = Math.max(0, this.puntaje);
+      this.textoPuntaje.setText(`Puntaje: ${this.puntaje}`);
+      return;
+    }
+
+    const entrada = this.inventario.find(i => i.tipo === tipo);
+    entrada.cantidad++;
+    this.puntaje += entrada.puntos;
+    this.textoPuntaje.setText(`Puntaje: ${this.puntaje}`);
+    this.textoUI.setText(this.getTextoInventario());
+    this.verificarVictoria();
+  }
+
+  itemReboto(objA, objB) {
+    const item = objA.tipo ? objA : objB;
+    if (!item || !item.active || !item.tipo) return;
+    if (item.rebotando) return;
+
+    item.rebotando = true;
+    item.puntosRestantes -= 5;
+
+    if (item.puntosRestantes <= 0) {
+      item.setActive(false).setVisible(false); // ← en lugar de destroy()
+      item.body.enable = false;                // ← desactivar física
+      this.time.delayedCall(50, () => { item.destroy(); }); // ← destruir después
+      return;
+    }
+
+    this.time.delayedCall(200, () => {
+      if (item && item.active) {
+        item.rebotando = false;
+      }
+    });
+  }
+
+  descontarTiempo() {
+    this.tiempoRestante--;
+    this.textoTiempo.setText(`Tiempo: ${this.tiempoRestante}`);
+    if (this.tiempoRestante <= 0) {
+      this.mostrarFinDeJuego(false);
+    }
+  }
+
+  verificarVictoria() {
+    const tieneItems  = this.inventario.every(i => i.cantidad >= 2);
+    const tienePuntos = this.puntaje >= 100;
+    if (tieneItems && tienePuntos) {
+      this.mostrarFinDeJuego(true);
+    }
+  }
+
+  getTextoInventario() {
+    return this.inventario
+      .map(i => `${i.tipo}: ${i.cantidad}`)
+      .join("   ");
+  }
+
+  mostrarFinDeJuego(gano) {
+    this.physics.pause();
+    this.time.removeAllEvents();
+    this.scene.start("end-scene", { gano: gano, puntaje: this.puntaje });
   }
 }
